@@ -14,6 +14,7 @@ camera_map = {
     4: "/home/user/Downloads/cow.mp4"
 }
 
+# Global detection count dictionary
 global_detection_counts = {
     cam_id: {"smoking": 0, "sleeping": 0, "mobile": 0, "object": 0}
     for cam_id in camera_map
@@ -47,7 +48,8 @@ def gen_frames(cam_id):
             continue
 
         h, w, _ = frame.shape
-        rgb = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         results_pose = pose.process(rgb)
         results_hands = hands.process(rgb)
@@ -56,6 +58,7 @@ def gen_frames(cam_id):
         box_coords = None
         cam_counts = global_detection_counts[cam_id]
 
+        # ========== Smoking Detection ==========
         if results_hands.multi_hand_landmarks and results_pose.pose_landmarks:
             for hand_landmarks in results_hands.multi_hand_landmarks:
                 hx = int(hand_landmarks.landmark[8].x * w)
@@ -69,52 +72,59 @@ def gen_frames(cam_id):
 
                 if np.sqrt((hx - mx)**2 + (hy - my)**2) < 50:
                     label = "Smoking"
+                    box_coords = (hx - 50, hy - 50, hx + 50, hy + 50)
                     with lock:
                         cam_counts["smoking"] += 1
-                    box_coords = (hx-50, hy-50, hx+50, hy+50)
+                    break
                 elif len(hand_history) >= 2:
                     dx = hand_history[-1][0] - hand_history[0][0]
                     dy = hand_history[-1][1] - hand_history[0][1]
                     speed = np.sqrt(dx**2 + dy**2)
                     if speed > 80 and np.sqrt((hx - mx)**2 + (hy - my)**2) > 80:
                         label = "Smoking (Throw)"
+                        box_coords = (hx - 50, hy - 50, hx + 50, hy + 50)
                         with lock:
                             cam_counts["smoking"] += 1
-                        box_coords = (hx-50, hy-50, hx+50, hy+50)
+                        break
 
+        # ========== Sleeping Detection ==========
         if results_pose.pose_landmarks:
             nose_y = results_pose.pose_landmarks.landmark[0].y
             shoulder_y = results_pose.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER].y
             if nose_y > shoulder_y:
                 label = "Sleeping"
-                with lock:
-                    cam_counts["sleeping"] += 1
                 x = int(results_pose.pose_landmarks.landmark[0].x * w)
                 y = int(results_pose.pose_landmarks.landmark[0].y * h)
-                box_coords = (x-50, y-50, x+50, y+50)
+                box_coords = (x - 50, y - 50, x + 50, y + 50)
+                with lock:
+                    cam_counts["sleeping"] += 1
 
+        # ========== Mobile Use Detection ==========
         if results_hands.multi_hand_landmarks and results_pose.pose_landmarks:
             for hand_landmarks in results_hands.multi_hand_landmarks:
-                for tip in [4, 8]:
-                    hx, hy = int(hand_landmarks.landmark[tip].x * w), int(hand_landmarks.landmark[tip].y * h)
+                for tip in [4, 8]:  # Thumb & Index
+                    hx = int(hand_landmarks.landmark[tip].x * w)
+                    hy = int(hand_landmarks.landmark[tip].y * h)
                     for ear_landmark in [mp_pose.PoseLandmark.LEFT_EAR, mp_pose.PoseLandmark.RIGHT_EAR]:
                         ear = results_pose.pose_landmarks.landmark[ear_landmark]
                         ex, ey = int(ear.x * w), int(ear.y * h)
-                        if np.sqrt((hx - ex)**2 + (hy - ey)**2) < 80:
+                        if np.sqrt((hx - ex) ** 2 + (hy - ey) ** 2) < 80:
                             label = "Using Mobile"
+                            box_coords = (hx - 50, hy - 50, hx + 50, hy + 50)
                             with lock:
                                 cam_counts["mobile"] += 1
-                            box_coords = (hx-50, hy-50, hx+50, hy+50)
                             break
 
+        # ========== General Object Detection ==========
         if label == "":
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             if gray.mean() > 40:
                 label = "Person/Object Detected"
+                box_coords = (20, 20, w - 20, h - 20)
                 with lock:
                     cam_counts["object"] += 1
-                box_coords = (20, 20, w-20, h-20)
 
+        # Draw label and green bounding box
         fps = 1 / (time.time() - prev_time)
         prev_time = time.time()
 
@@ -124,14 +134,16 @@ def gen_frames(cam_id):
                 x1, y1, x2, y2 = box_coords
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
+        # Draw detection counts
         with lock:
             c = cam_counts.copy()
-        print(f"[Camera {cam_id}] Smoking: {c['smoking']}, Sleeping: {c['sleeping']}, Mobile: {c['mobile']}, Object: {c['object']}")
-
-        cv2.putText(frame, f"Smoking: {c['smoking']}", (10, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-        cv2.putText(frame, f"Sleeping: {c['sleeping']}", (10, h - 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-        cv2.putText(frame, f"Mobile: {c['mobile']}", (10, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,255), 2)
-        cv2.putText(frame, f"FPS: {int(fps)}", (w - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2)
+        print(f"[Camera {cam_id}] Smoking: {c['smoking']}, "
+              f"Sleeping: {c['sleeping']}, Mobile: {c['mobile']}, "
+              f"Object: {c['object']}")
+        cv2.putText(frame, f"Smoking: {c['smoking']}", (10, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, f"Sleeping: {c['sleeping']}", (10, h - 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, f"Mobile: {c['mobile']}", (10, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        cv2.putText(frame, f"FPS: {int(fps)}", (w - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
