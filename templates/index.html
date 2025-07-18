@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Detection Feeds</title>
+    <style>
+        body {
+            background: #000;
+            color: white;
+            font-family: Arial;
+        }
+        h1 {
+            text-align: center;
+            padding: 10px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .cam-box {
+            background: #111;
+            padding: 5px;
+            border-radius: 10px;
+        }
+        img {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+        .label {
+            text-align: center;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live Detection Feeds (Smoke / Sleep / Mobile / Person)</h1>
+    <div class="grid">
+        {% for i in range(1, 9) %}
+        <div class="cam-box">
+            <img src="{{ url_for('video_feed', cam_id=i) }}">
+            <div class="label">Camera {{ i }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+</body>
+</html>
+
